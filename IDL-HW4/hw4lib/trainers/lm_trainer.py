@@ -54,8 +54,8 @@ class LMTrainer(BaseTrainer):
         # How would you set the ignore_index? 
         # Use value in config to set the label_smoothing argument
         self.criterion = nn.CrossEntropyLoss(
-            ignore_index=self.tokenizer.pad_id,  # Use pad_id as the ignore_index
-            label_smoothing=self.config['training'].get('label_smoothing', 0.0)
+          ignore_index=self.tokenizer.pad_id,
+          label_smoothing=self.config['loss'].get('label_smoothing', 0.0)
         )
 
     def _train_epoch(self, dataloader) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
@@ -69,8 +69,7 @@ class LMTrainer(BaseTrainer):
         """
 
         # TODO: In-fill the _train_epoch method
-        # raise NotImplementedError # Remove once implemented
-        
+
         # Initialize training variables
         self.model.train()
         batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc=f"[Training LM]")
@@ -82,14 +81,15 @@ class LMTrainer(BaseTrainer):
 
         for i, batch in enumerate(dataloader):
             # TODO: Unpack batch from the dataloader
-            # TODO: Move the batch elements to self.device
             targets_shifted, targets_golden, lengths = batch
+
+            # TODO: Move the batch elements to self.device
             targets_shifted = targets_shifted.to(self.device)
             targets_golden = targets_golden.to(self.device)
             lengths = lengths.to(self.device)
-        
-
+            
             with torch.autocast(device_type=self.device, dtype=torch.float16):
+
 
                 # TODO: Get raw logits and attention weights from model
                 raw_preds, attn_weights = self.model(targets_shifted, lengths)
@@ -98,7 +98,7 @@ class LMTrainer(BaseTrainer):
                 # What is the shape of raw_preds and targets_golden? 
                 # Would you need to change the shape of the inputs to the criterion?
                 # Hint: See the documentation for CrossEntropyLoss
-                raw_loss = self.criterion(raw_preds.view(-1, raw_preds.size(-1)), targets_golden.view(-1))
+                raw_loss = self.criterion(raw_preds.view(-1, self.tokenizer.vocab_size), targets_golden.view(-1))
                 
             # Calculate metrics with raw loss (DO NOT MODIFY THIS)
             batch_tokens = lengths.sum().item()
@@ -109,7 +109,7 @@ class LMTrainer(BaseTrainer):
             loss = raw_loss / self.config['training']['gradient_accumulation_steps']
             
             # TODO: Backpropagate the loss
-            self.scaler = self.scaler.scale(loss).backward()
+            self.scaler.scale(loss).backward()
         
             # Only update weights after accumulating enough gradients
             if (i + 1) % self.config['training']['gradient_accumulation_steps'] == 0:
@@ -170,7 +170,7 @@ class LMTrainer(BaseTrainer):
 
         # TODO: In-fill the _validate_epoch method
 
-        # raise NotImplementedError # Remove once implemented
+        
         
         # Initialize validation variables
         self.model.eval()
@@ -180,8 +180,9 @@ class LMTrainer(BaseTrainer):
 
         for i, batch in enumerate(dataloader):
             # TODO: Unpack batch
-            # TODO: Move the batch elements to self.device
             targets_shifted, targets_golden, lengths = batch
+            
+            # TODO: Move the batch elements to self.device
             targets_shifted = targets_shifted.to(self.device)
             targets_golden = targets_golden.to(self.device)
             lengths = lengths.to(self.device)
@@ -195,13 +196,13 @@ class LMTrainer(BaseTrainer):
                 # What is the shape of raw_preds and targets_golden? 
                 # Would you need to change the shape of the inputs to the criterion?
                 # Hint: See the documentation for CrossEntropyLoss
-                loss = self.criterion(raw_preds.view(-1, raw_preds.size(-1)), targets_golden.view(-1))
+                loss = self.criterion(raw_preds.view(-1, self.tokenizer.vocab_size), targets_golden.view(-1))
 
             # Calculate metrics
             batch_tokens = lengths.sum().item()
             total_tokens += batch_tokens
             running_ce_loss += loss.item() * batch_tokens
-
+            
             # Update the progress bar
             avg_ce_loss = running_ce_loss / total_tokens
             perplexity_token = torch.exp(torch.tensor(avg_ce_loss))
@@ -246,7 +247,7 @@ class LMTrainer(BaseTrainer):
             raise ValueError("Optimizer is not initialized, initialize it first!")
         
         # TODO: In-fill the train method
-        # raise NotImplementedError # Remove once implemented
+       
 
         # Training loop
         best_val_loss = float('inf')
@@ -354,7 +355,7 @@ class LMTrainer(BaseTrainer):
         # TODO: In-fill the generate method
         # You just need to implement the greedy search generation
         # See the TODO below
-        # raise NotImplementedError # Remove once implemented
+        
 
         if generation_config is None:
             # Greedy search (default)
@@ -391,12 +392,11 @@ class LMTrainer(BaseTrainer):
         with torch.inference_mode():
             if generation_config.get('top_k', 0) > 0 or generation_config.get('top_p', 0) > 0:
                 print("Generating with sampling...")
-                seqs, scores = generator.generate_greedy(
-                    prompts, 
-                    temperature=generation_config.get('temperature', 1.0),
-                    repeat_penalty=generation_config.get('repeat_penalty', 1.0)
+                seqs, scores = generator.generate_sample(
+                  prompts,
+                  temperature=generation_config.get('temperature', 1.0),
+                  repeat_penalty=generation_config.get('repeat_penalty', 1.0)
                 )
-                # raise NotImplementedError # Remove if you implemented the sampling method
             elif generation_config.get('beam_width', 1) > 1:
                 print("Generating with beam search...")
                 seqs, scores = generator.generate_beam(
@@ -404,7 +404,7 @@ class LMTrainer(BaseTrainer):
                     beam_width=generation_config.get('beam_width', 5),
                     temperature=generation_config.get('temperature', 1.0),
                     repeat_penalty=generation_config.get('repeat_penalty', 1.0)
-                )
+                ) # Remove if you implemented the beam search method
                 # Take best beam and score
                 seqs = seqs[:, 0]
                 scores = scores[:, 0]
@@ -416,7 +416,6 @@ class LMTrainer(BaseTrainer):
                     temperature=generation_config.get('temperature', 1.0),
                     repeat_penalty=generation_config.get('repeat_penalty', 1.0)
                 )
-
         # Post-process sequences (trim upto EOS token)
         processed_seqs = generator.post_process_sequence(seqs, self.tokenizer)
 
